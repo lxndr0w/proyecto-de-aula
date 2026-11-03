@@ -4,12 +4,19 @@ Este módulo dibuja las pantallas con Pygame y llama a las funciones de
 estructuras.py. No repite la lógica de las estructuras de datos.
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import date
 import sys
 
 import pygame
 
 import estructuras
+
+try:
+    import persistencia
+except ImportError:
+    # persistencia.py lo desarrolla Ana; mientras no exista, el juego avisa en pantalla.
+    persistencia = None
 
 
 # Configuración de la ventana
@@ -354,8 +361,7 @@ class Juego:
         dibujar_boton(self.pantalla, self.fuentes["normal"], "Cargar partida", self.botones_menu["cargar"], False)
         dibujar_boton(self.pantalla, self.fuentes["normal"], "Salir", self.botones_menu["salir"], False)
 
-        if self.mensaje:
-            dibujar_texto(self.pantalla, self.fuentes["pequena"], self.mensaje, (370, 510), ROJO)
+        self.dibujar_mensaje((300, 510))
 
     def clic_menu(self, posicion) -> None:
         """Atiende los clics del menú principal.
@@ -368,8 +374,7 @@ class Juego:
         if self.botones_menu["iniciar"].collidepoint(posicion):
             self.abrir_registro()
         elif self.botones_menu["cargar"].collidepoint(posicion):
-            # Pendiente: conectar con persistencia.py.
-            pass
+            self.cargar()
         elif self.botones_menu["salir"].collidepoint(posicion):
             self.ejecutando = False
 
@@ -532,11 +537,11 @@ class Juego:
         self.estado = "respuesta"
         self.botones = {"continuar": ("Continuar", pygame.Rect(760, 595, 200, 42))}
 
-    def avanzar_sala(self) -> None:
-        """Abre la sala que sigue a la última pregunta o la pantalla final.
+    def abrir_sala(self, sala) -> None:
+        """Abre la sala de recolección indicada.
 
         Parámetros:
-            Ninguno.
+            sala: nombre de la sala (estanterias, mapas, fichas o sellos).
         Retorna:
             None.
         """
@@ -546,12 +551,129 @@ class Juego:
             "fichas": self.abrir_fichas,
             "sellos": self.abrir_sellos,
         }
+        aperturas.get(sala, self.abrir_estanterias)()
+        self.botones["guardar"] = ("Guardar", pygame.Rect(40, 595, 150, 42))
+
+    def avanzar_sala(self) -> None:
+        """Abre la sala que sigue a la última pregunta o la pantalla final.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
         indice = SALAS.index(self.sala_pregunta)
 
         if not self.jugador.activo or indice == len(SALAS) - 1:
             self.abrir_fin()
         else:
-            aperturas[SALAS[indice + 1]]()
+            self.abrir_sala(SALAS[indice + 1])
+
+    # ------------------------------------------------------------------
+    # Guardar y cargar con persistencia.py
+    # ------------------------------------------------------------------
+    def datos_partida(self) -> dict:
+        """Reúne los datos de la partida que se guardan en el archivo.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            Diccionario con el jugador, la sala actual, los fragmentos y las pistas.
+        """
+        return {
+            "jugador": asdict(self.jugador),
+            "sala_actual": self.estado,
+            "fragmentos": self.inventario,
+            "pistas": self.pistas,
+            "aciertos": self.aciertos,
+            "respondidas": self.respondidas,
+            "intentos": self.intentos,
+        }
+
+    def guardar(self) -> None:
+        """Guarda la partida actual con persistencia.guardar_partida.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        if persistencia is None:
+            self.mensaje = "Error: persistencia.py todavía no está disponible."
+            return
+
+        try:
+            exito, mensaje = persistencia.guardar_partida(self.datos_partida())
+        except (OSError, TypeError, ValueError) as error:
+            self.mensaje = f"Error: no se pudo guardar la partida ({error})."
+            return
+
+        self.mensaje = mensaje if exito else f"Error: {mensaje}"
+
+    def cargar(self) -> None:
+        """Carga una partida con persistencia.cargar_partida y abre su sala.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        if persistencia is None:
+            self.mensaje = "Error: persistencia.py todavía no está disponible."
+            return
+
+        try:
+            datos, mensaje = persistencia.cargar_partida()
+        except (OSError, ValueError) as error:
+            # Cubre FileNotFoundError y json.JSONDecodeError si el módulo los propaga.
+            self.mensaje = f"Error: no se pudo cargar la partida ({error})."
+            return
+
+        if datos is None:
+            self.mensaje = f"Error: {mensaje}"
+            return
+
+        try:
+            self.jugador = Jugador(**datos["jugador"])
+            self.inventario = estructuras.ordenar_fragmentos(list(datos["fragmentos"]))
+            self.pistas = {"a": list(datos["pistas"]["a"]), "b": list(datos["pistas"]["b"])}
+            self.aciertos = datos.get("aciertos", 0)
+            self.respondidas = datos.get("respondidas", 0)
+            self.intentos = datos.get("intentos", 0)
+            sala = datos["sala_actual"]
+        except (KeyError, TypeError, ValueError):
+            self.mensaje = "Error: el archivo de la partida tiene datos incompletos."
+            return
+
+        self.abrir_sala(sala)
+        self.mensaje = f"Partida de {self.jugador.nombre} cargada."
+
+    def guardar_puntaje(self) -> None:
+        """Registra el resultado final con persistencia.guardar_puntaje.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        if persistencia is None:
+            self.mensaje = "Error: persistencia.py todavía no está disponible."
+            return
+
+        registro = {
+            "nombre": self.jugador.nombre,
+            "puntaje": self.jugador.puntaje,
+            "fecha": date.today().isoformat(),
+            "fragmentos_validos": len(self.inventario),
+            "intentos": self.intentos,
+        }
+        try:
+            exito, mensaje = persistencia.guardar_puntaje(registro)
+        except (OSError, TypeError, ValueError) as error:
+            self.mensaje = f"Error: no se pudo guardar el puntaje ({error})."
+            return
+
+        self.mensaje = mensaje if exito else f"Error: {mensaje}"
 
     def dibujar_pregunta(self) -> None:
         """Muestra la pregunta conceptual y sus opciones.
@@ -647,8 +769,7 @@ class Juego:
             None.
         """
         if accion == "guardar_puntaje":
-            # Pendiente: conectar con persistencia.py.
-            pass
+            self.guardar_puntaje()
         elif accion == "salir":
             self.ejecutando = False
 
@@ -726,6 +847,7 @@ class Juego:
         self.mensaje = ""
         self.campos = []
         self.estado = "bienvenida"
+        self.boton_continuar = pygame.Rect(700, 560, 200, 45)
 
     def dibujar_bienvenida(self) -> None:
         """Muestra el resumen del jugador después de validar el registro.
@@ -749,7 +871,6 @@ class Juego:
         for indice, dato in enumerate(datos):
             dibujar_texto(self.pantalla, self.fuentes["normal"], dato, (80, 200 + indice * 38))
 
-        self.boton_continuar = pygame.Rect(700, 560, 200, 45)
         dibujar_boton(self.pantalla, self.fuentes["normal"], "Continuar", self.boton_continuar)
 
     def clic_bienvenida(self, posicion) -> None:
@@ -1023,7 +1144,7 @@ class Juego:
                 valor = estructuras.consultar_ficha(self.ficha_actual, clave)
                 dibujar_texto(self.pantalla, self.fuentes["normal"], f"{clave}: {valor}", (60, 275 + indice * 32))
 
-        self.dibujar_inventario(40, 435, maximo=5)
+        self.dibujar_inventario(510, 225, maximo=10)
 
     def accion_fichas(self, accion) -> None:
         """Consulta una ficha completa o una clave de la ficha.
@@ -1189,6 +1310,10 @@ class Juego:
         Retorna:
             None.
         """
+        if accion == "guardar":
+            self.guardar()
+            return
+
         try:
             if self.estado == "estanterias":
                 self.accion_estanterias(accion)
