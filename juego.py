@@ -243,6 +243,16 @@ class Juego:
         self.objetivo = estructuras.crear_posicion(3, 4)
         self.recorrido = []
 
+        # Datos de la Sala de Fichas.
+        self.ficha_actual = None
+
+        # Datos de la Sala de Sellos: dos pistas con códigos repetidos.
+        self.pistas = {
+            "a": [101, 102, 102, 105, 107, 107],
+            "b": [102, 105, 105, 110, 110, 110],
+        }
+        self.resultados_sellos = []
+
         self.botones_menu = {
             "iniciar": pygame.Rect(370, 300, 260, 50),
             "cargar": pygame.Rect(370, 370, 260, 50),
@@ -414,6 +424,8 @@ class Juego:
         aperturas = {
             "estanterias": self.abrir_estanterias,
             "mapas": self.abrir_mapas,
+            "fichas": self.abrir_fichas,
+            "sellos": self.abrir_sellos,
         }
         siguiente = SALAS[SALAS.index(self.estado) + 1] if self.estado in SALAS[:-1] else None
 
@@ -743,6 +755,184 @@ class Juego:
             self.mensaje = f"Aquí no está. El fragmento está {vertical} y {horizontal}."
 
     # ------------------------------------------------------------------
+    # Sala de Fichas: diccionarios
+    # ------------------------------------------------------------------
+    def abrir_fichas(self) -> None:
+        """Prepara la consulta de fichas por código y por clave.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.estado = "fichas"
+        self.mensaje = ""
+        self.foco = 0
+        self.reto_superado = False
+        self.ficha_actual = None
+        self.campos = [
+            CampoTexto("Código del fragmento", pygame.Rect(40, 125, 200, 42)),
+            CampoTexto("Clave (codigo, titulo, sala, valor...)", pygame.Rect(270, 125, 300, 42)),
+        ]
+        self.botones = {
+            "consultar": ("Consultar ficha", pygame.Rect(590, 125, 180, 42)),
+            "clave": ("Consultar clave", pygame.Rect(785, 125, 175, 42)),
+            "terminar": ("Terminar sala", pygame.Rect(760, 595, 200, 42)),
+        }
+
+    def dibujar_fichas(self) -> None:
+        """Muestra la ficha consultada y el inventario disponible.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.dibujar_encabezado(
+            "Sala de Fichas",
+            "Cada ficha es un diccionario. Consulta un fragmento por su código y luego pide una clave.",
+        )
+        self.dibujar_campos()
+        self.dibujar_botones()
+        self.dibujar_mensaje((40, 185))
+
+        panel = pygame.Rect(40, 225, 430, 190)
+        pygame.draw.rect(self.pantalla, PANEL, panel, border_radius=14)
+        dibujar_texto(self.pantalla, self.fuentes["normal"], "Ficha consultada", (60, 238), NARANJA)
+        if self.ficha_actual is None:
+            dibujar_texto(self.pantalla, self.fuentes["pequena"], "Escribe un código y presiona Consultar ficha.", (60, 275), GRIS)
+        else:
+            for indice, clave in enumerate(estructuras.CLAVES_FRAGMENTO):
+                valor = estructuras.consultar_ficha(self.ficha_actual, clave)
+                dibujar_texto(self.pantalla, self.fuentes["normal"], f"{clave}: {valor}", (60, 275 + indice * 32))
+
+        self.dibujar_inventario(40, 435, maximo=5)
+
+    def accion_fichas(self, accion) -> None:
+        """Consulta una ficha completa o una clave de la ficha.
+
+        Parámetros:
+            accion: nombre del botón presionado.
+        Retorna:
+            None.
+        """
+        if accion == "terminar":
+            if not self.reto_superado:
+                self.mensaje = "Error: consulta al menos una ficha que exista."
+            else:
+                self.terminar_sala()
+            return
+
+        if accion == "consultar":
+            codigo = self.leer_entero(0, "Código", minimo=1)
+            if codigo is None:
+                return
+            ficha = estructuras.buscar_fragmento(self.inventario, codigo)
+            if ficha is None:
+                self.mensaje = f"Error: el código {codigo} no existe en el inventario."
+            else:
+                self.ficha_actual = ficha
+                self.reto_superado = True
+                self.mensaje = f"Ficha {codigo} encontrada."
+
+        elif accion == "clave":
+            if self.ficha_actual is None:
+                self.mensaje = "Error: primero consulta una ficha por su código."
+                return
+            clave = self.campos[1].texto.strip()
+            valor = estructuras.consultar_ficha(self.ficha_actual, clave)
+            if valor is None:
+                self.mensaje = (
+                    f"Error: la clave '{clave}' no existe en la ficha. "
+                    "Las claves son: codigo, titulo, sala y valor."
+                )
+            else:
+                self.mensaje = f"{clave} = {valor}"
+
+    # ------------------------------------------------------------------
+    # Sala de Sellos: conjuntos
+    # ------------------------------------------------------------------
+    def abrir_sellos(self) -> None:
+        """Prepara las pistas y las operaciones de conjuntos.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.estado = "sellos"
+        self.mensaje = ""
+        self.campos = []
+        self.reto_superado = False
+        self.resultados_sellos = []
+        self.botones = {
+            "duplicados": ("Quitar repetidos", pygame.Rect(40, 215, 200, 42)),
+            "union": ("Unión", pygame.Rect(255, 215, 150, 42)),
+            "interseccion": ("Intersección", pygame.Rect(420, 215, 150, 42)),
+            "diferencia": ("Diferencia A - B", pygame.Rect(585, 215, 190, 42)),
+            "terminar": ("Terminar sala", pygame.Rect(760, 595, 200, 42)),
+        }
+
+    def dibujar_sellos(self) -> None:
+        """Muestra las dos pistas y los resultados de las operaciones.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.dibujar_encabezado(
+            "Sala de Sellos",
+            "Las pistas son grupos de códigos. Un conjunto quita los repetidos y permite compararlas.",
+        )
+        dibujar_texto(self.pantalla, self.fuentes["normal"], f"Pista A: {self.pistas['a']}", (40, 110))
+        dibujar_texto(self.pantalla, self.fuentes["normal"], f"Pista B: {self.pistas['b']}", (40, 145))
+        self.dibujar_botones()
+        self.dibujar_mensaje((40, 275))
+
+        for indice, linea in enumerate(self.resultados_sellos[-8:]):
+            dibujar_texto(self.pantalla, self.fuentes["normal"], linea, (40, 315 + indice * 32))
+
+        dibujar_texto(
+            self.pantalla, self.fuentes["pequena"],
+            "Nota: un conjunto no guarda orden; aquí se muestra ordenado solo para leerlo mejor.",
+            (40, 565), GRIS,
+        )
+
+    def accion_sellos(self, accion) -> None:
+        """Ejecuta la operación de conjuntos elegida.
+
+        Parámetros:
+            accion: nombre del botón presionado.
+        Retorna:
+            None.
+        """
+        if accion == "terminar":
+            if not self.reto_superado:
+                self.mensaje = "Error: primero quita los códigos repetidos de las pistas."
+            else:
+                self.terminar_sala()
+            return
+
+        if accion == "duplicados":
+            unicos_a, repetidos_a = estructuras.eliminar_duplicados(self.pistas["a"])
+            unicos_b, repetidos_b = estructuras.eliminar_duplicados(self.pistas["b"])
+            self.resultados_sellos.append(f"Pista A sin repetidos: {sorted(unicos_a)}  (se eliminaron {repetidos_a})")
+            self.resultados_sellos.append(f"Pista B sin repetidos: {sorted(unicos_b)}  (se eliminaron {repetidos_b})")
+            self.reto_superado = True
+            self.mensaje = f"Se eliminaron {repetidos_a + repetidos_b} códigos repetidos en total."
+            return
+
+        resultado = estructuras.operaciones_conjuntos(self.pistas["a"], self.pistas["b"])
+        if accion == "union":
+            self.resultados_sellos.append(f"Unión A | B: {sorted(resultado['union'])}")
+        elif accion == "interseccion":
+            self.resultados_sellos.append(f"Intersección A & B: {sorted(resultado['interseccion'])}")
+        elif accion == "diferencia":
+            self.resultados_sellos.append(f"Diferencia A - B: {sorted(resultado['diferencia_a_b'])}")
+        self.mensaje = ""
+
+    # ------------------------------------------------------------------
     # Ciclo principal
     # ------------------------------------------------------------------
     def dibujar(self) -> None:
@@ -763,6 +953,10 @@ class Juego:
             self.dibujar_estanterias()
         elif self.estado == "mapas":
             self.dibujar_mapas()
+        elif self.estado == "fichas":
+            self.dibujar_fichas()
+        elif self.estado == "sellos":
+            self.dibujar_sellos()
 
     def ejecutar_accion(self, accion) -> None:
         """Envía la acción del botón a la sala activa sin dejar que un error cierre el juego.
@@ -777,6 +971,10 @@ class Juego:
                 self.accion_estanterias(accion)
             elif self.estado == "mapas":
                 self.accion_mapas(accion)
+            elif self.estado == "fichas":
+                self.accion_fichas(accion)
+            elif self.estado == "sellos":
+                self.accion_sellos(accion)
         except (TypeError, ValueError) as error:
             # estructuras.py lanza estos errores cuando un dato no es válido.
             self.mensaje = f"Error: {error}"
@@ -829,6 +1027,8 @@ class Juego:
                 self.ejecutar_accion("agregar")
             elif self.estado == "mapas":
                 self.ejecutar_accion("mover")
+            elif self.estado == "fichas":
+                self.ejecutar_accion("consultar")
         elif evento.unicode and evento.unicode.isprintable() and len(campo.texto) < 30:
             campo.texto += evento.unicode
 
