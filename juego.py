@@ -23,6 +23,67 @@ SALAS = ["vestibulo", "estanterias", "mapas", "fichas", "sellos"]
 # Tamaño de la cuadrícula de la Sala de Mapas.
 TAMANO_MAPA = 6
 
+# Puntos que se suman por cada pregunta bien contestada.
+PUNTOS_POR_ACIERTO = 10
+
+# Pregunta conceptual de cada sala: (pregunta, opciones, índice de la correcta).
+PREGUNTAS = {
+    "vestibulo": (
+        "¿Por qué hay que validar antes de usar el puntaje?",
+        [
+            "Porque lo que se escribe puede no ser un número y el programa fallaría.",
+            "Porque Python convierte cualquier texto a número automáticamente.",
+            "No hace falta validar, el puntaje siempre es correcto.",
+        ],
+        0,
+    ),
+    "estanterias": (
+        "¿Por qué el inventario va en una lista y no en un diccionario?",
+        [
+            "Porque una lista busca por clave más rápido que un diccionario.",
+            "Porque la lista guarda el orden y permite ordenar, insertar y eliminar.",
+            "Porque un diccionario no puede guardar textos.",
+        ],
+        1,
+    ),
+    "mapas": (
+        "¿En qué se diferencia algo que se puede cambiar de algo que no?",
+        [
+            "No hay diferencia entre una lista y una tupla.",
+            "Una tupla se puede cambiar con posicion[0] = 5.",
+            "Una lista se puede modificar; una tupla no, hay que crear otra nueva.",
+        ],
+        2,
+    ),
+    "fichas": (
+        "¿Qué pasa si pido una clave que no existe?",
+        [
+            "Con ficha[clave] sale KeyError; con ficha.get(clave) se obtiene None.",
+            "Python crea la clave automáticamente con valor cero.",
+            "El diccionario devuelve la primera clave que tenga.",
+        ],
+        0,
+    ),
+    "sellos": (
+        "¿Por qué un conjunto quita duplicados y no guarda el orden?",
+        [
+            "Porque ordena los elementos de menor a mayor.",
+            "Porque guarda cada elemento una sola vez y los ubica por su hash.",
+            "Porque borra el último elemento repetido de la lista.",
+        ],
+        1,
+    ),
+}
+
+# Fragmento que gana el jugador al superar cada sala: (codigo, titulo, valor).
+PREMIOS = {
+    "vestibulo": (901, "Registro del explorador", 5),
+    "estanterias": (902, "Índice de estanterías", 10),
+    "mapas": (903, "Plano de la biblioteca", 10),
+    "fichas": (904, "Fichero antiguo", 10),
+    "sellos": (905, "Sello del archivo", 15),
+}
+
 # Colores
 FONDO = (18, 25, 43)
 PANEL = (29, 40, 64)
@@ -253,6 +314,13 @@ class Juego:
         }
         self.resultados_sellos = []
 
+        # Progreso de las preguntas.
+        self.sala_pregunta = None
+        self.respuesta_correcta = False
+        self.aciertos = 0
+        self.respondidas = 0
+        self.intentos = 0
+
         self.botones_menu = {
             "iniciar": pygame.Rect(370, 300, 260, 50),
             "cargar": pygame.Rect(370, 370, 260, 50),
@@ -414,7 +482,58 @@ class Juego:
             )
 
     def terminar_sala(self) -> None:
-        """Pasa a la siguiente sala del recorrido.
+        """Muestra la pregunta conceptual de la sala que se acaba de superar.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.sala_pregunta = self.estado
+        self.estado = "pregunta"
+        self.mensaje = ""
+        self.campos = []
+        _, opciones, _ = PREGUNTAS[self.sala_pregunta]
+        self.botones = {
+            f"opcion_{indice}": (f"{indice + 1}. {opcion}", pygame.Rect(40, 230 + indice * 70, 920, 52))
+            for indice, opcion in enumerate(opciones)
+        }
+
+    def responder(self, indice) -> None:
+        """Revisa la respuesta, actualiza el puntaje y entrega el fragmento de la sala.
+
+        Parámetros:
+            indice: posición de la opción elegida.
+        Retorna:
+            None.
+        """
+        _, _, correcta = PREGUNTAS[self.sala_pregunta]
+        self.respondidas += 1
+        self.respuesta_correcta = indice == correcta
+
+        if self.respuesta_correcta:
+            self.aciertos += 1
+            self.jugador.puntaje += PUNTOS_POR_ACIERTO
+        else:
+            # Una respuesta incorrecta gasta un intento, pero se puede seguir.
+            self.intentos += 1
+            self.jugador.vida -= 1
+
+        self.jugador.precision = self.aciertos / self.respondidas * 100
+        self.jugador.nivel += 1
+
+        codigo, titulo, valor = PREMIOS[self.sala_pregunta]
+        premio = estructuras.crear_fragmento(codigo, titulo, self.sala_pregunta.capitalize(), valor)
+        estructuras.agregar_fragmento(self.inventario, premio)
+
+        if self.jugador.vida <= 0:
+            self.jugador.activo = False
+
+        self.estado = "respuesta"
+        self.botones = {"continuar": ("Continuar", pygame.Rect(760, 595, 200, 42))}
+
+    def avanzar_sala(self) -> None:
+        """Abre la sala que sigue a la última pregunta o la pantalla final.
 
         Parámetros:
             Ninguno.
@@ -427,13 +546,111 @@ class Juego:
             "fichas": self.abrir_fichas,
             "sellos": self.abrir_sellos,
         }
-        siguiente = SALAS[SALAS.index(self.estado) + 1] if self.estado in SALAS[:-1] else None
+        indice = SALAS.index(self.sala_pregunta)
 
-        if siguiente in aperturas:
-            aperturas[siguiente]()
+        if not self.jugador.activo or indice == len(SALAS) - 1:
+            self.abrir_fin()
         else:
-            # Pendiente: las demás salas.
+            aperturas[SALAS[indice + 1]]()
+
+    def dibujar_pregunta(self) -> None:
+        """Muestra la pregunta conceptual y sus opciones.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        pregunta, _, _ = PREGUNTAS[self.sala_pregunta]
+        self.dibujar_encabezado("Pregunta de la sala", "Elige la opción correcta para ganar puntos.")
+        dibujar_texto(self.pantalla, self.fuentes["subtitulo"], pregunta, (40, 140))
+        for accion, (texto, rectangulo) in self.botones.items():
+            dibujar_boton(self.pantalla, self.fuentes["normal"], texto, rectangulo, False)
+
+    def dibujar_respuesta(self) -> None:
+        """Informa si la respuesta fue correcta y muestra el avance.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.dibujar_encabezado("Resultado", "Así va tu partida.")
+        if self.respuesta_correcta:
+            dibujar_texto(self.pantalla, self.fuentes["titulo"], "¡Respuesta correcta!", (40, 110), VERDE)
+            detalle = f"Ganaste {PUNTOS_POR_ACIERTO} puntos."
+        else:
+            dibujar_texto(self.pantalla, self.fuentes["titulo"], "Respuesta incorrecta", (40, 110), ROJO)
+            _, opciones, correcta = PREGUNTAS[self.sala_pregunta]
+            detalle = f"Perdiste una vida. La correcta era: {opciones[correcta]}"
+        dibujar_texto(self.pantalla, self.fuentes["normal"], detalle, (40, 170))
+
+        codigo, titulo, _ = PREMIOS[self.sala_pregunta]
+        dibujar_texto(self.pantalla, self.fuentes["normal"], f"Fragmento obtenido: {codigo} - {titulo}", (40, 205), NARANJA)
+
+        salas_superadas = SALAS.index(self.sala_pregunta) + 1
+        dibujar_texto(
+            self.pantalla, self.fuentes["normal"],
+            f"Avance: {salas_superadas} de {len(SALAS)} etapas  |  Intentos fallidos: {self.intentos}",
+            (40, 240), AZUL,
+        )
+        self.dibujar_inventario(40, 290)
+        self.dibujar_botones()
+
+    # ------------------------------------------------------------------
+    # Pantalla final de la recolección
+    # ------------------------------------------------------------------
+    def abrir_fin(self) -> None:
+        """Prepara la pantalla final de la semana 2.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.estado = "fin"
+        self.mensaje = ""
+        self.botones = {
+            "guardar_puntaje": ("Guardar puntaje", pygame.Rect(530, 595, 210, 42)),
+            "salir": ("Salir", pygame.Rect(760, 595, 200, 42)),
+        }
+
+    def dibujar_fin(self) -> None:
+        """Muestra el resumen de la partida.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.dibujar_encabezado("Fin de la recolección", "La Sala Central se habilita en la semana 3.")
+        if self.jugador.activo:
+            dibujar_texto(self.pantalla, self.fuentes["titulo"], "¡Recolectaste los fragmentos!", (40, 110), VERDE)
+        else:
+            dibujar_texto(self.pantalla, self.fuentes["titulo"], "Te quedaste sin vidas", (40, 110), ROJO)
+
+        resumen = (
+            f"Puntaje: {self.jugador.puntaje}  |  Aciertos: {self.aciertos} de {self.respondidas}  |  "
+            f"Intentos fallidos: {self.intentos}"
+        )
+        dibujar_texto(self.pantalla, self.fuentes["normal"], resumen, (40, 175))
+        self.dibujar_inventario(40, 225, maximo=10)
+        self.dibujar_mensaje((40, 560))
+        self.dibujar_botones()
+
+    def accion_fin(self, accion) -> None:
+        """Atiende los botones de la pantalla final.
+
+        Parámetros:
+            accion: nombre del botón presionado.
+        Retorna:
+            None.
+        """
+        if accion == "guardar_puntaje":
+            # Pendiente: conectar con persistencia.py.
             pass
+        elif accion == "salir":
+            self.ejecutando = False
 
     def dibujar_mensaje(self, posicion) -> None:
         """Muestra el último mensaje; en rojo si es un error y en verde si no.
@@ -957,6 +1174,12 @@ class Juego:
             self.dibujar_fichas()
         elif self.estado == "sellos":
             self.dibujar_sellos()
+        elif self.estado == "pregunta":
+            self.dibujar_pregunta()
+        elif self.estado == "respuesta":
+            self.dibujar_respuesta()
+        elif self.estado == "fin":
+            self.dibujar_fin()
 
     def ejecutar_accion(self, accion) -> None:
         """Envía la acción del botón a la sala activa sin dejar que un error cierre el juego.
@@ -975,6 +1198,12 @@ class Juego:
                 self.accion_fichas(accion)
             elif self.estado == "sellos":
                 self.accion_sellos(accion)
+            elif self.estado == "pregunta":
+                self.responder(int(accion.split("_")[1]))
+            elif self.estado == "respuesta":
+                self.avanzar_sala()
+            elif self.estado == "fin":
+                self.accion_fin(accion)
         except (TypeError, ValueError) as error:
             # estructuras.py lanza estos errores cuando un dato no es válido.
             self.mensaje = f"Error: {error}"
