@@ -2,130 +2,97 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-
 BASE_DIR = Path(__file__).resolve().parent
-
 DATA_DIR = BASE_DIR / "data"
-
 RUTA_PARTIDA = DATA_DIR / "partida.json"
-
 RUTA_PUNTAJES = DATA_DIR / "puntajes.json"
 
 def convertir_json(datos):
-
     if isinstance(datos, (set, tuple)):
         return list(datos)
-
     if isinstance(datos, list):
         return [convertir_json(x) for x in datos]
-
     if isinstance(datos, dict):
-        return {
-            clave: convertir_json(valor)
-            for clave, valor in datos.items()
-        }
-
+        return {clave: convertir_json(valor) for clave, valor in datos.items()}
     return datos
 
 def recuperar_datos(datos):
-
-  if isinstance(datos, list):
+    if isinstance(datos, list):
         return [recuperar_datos(x) for x in datos]
 
-  if isinstance(datos, dict):
+    if isinstance(datos, dict):
         for clave in datos:
-
             if clave == "posicion":
                 datos[clave] = tuple(datos[clave])
-
             elif clave == "codigos_obtenidos":
                 datos[clave] = set(datos[clave])
-
             else:
                 datos[clave] = recuperar_datos(datos[clave])
-
-        return datos
+                
+    return datos
 
 def guardar_partida(datos_partida, ruta=None):
-
     if ruta is None:
         ruta = RUTA_PARTIDA
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
 
     datos = convertir_json(datos_partida)
 
     try:
-        archivo = open(ruta, "w", encoding="utf-8")
-        json.dump(datos, archivo, indent=4)
-        archivo.close()
-
+        with open(ruta, "w", encoding="utf-8") as archivo:
+            json.dump(datos, archivo, indent=4)
         return True
-
-    except:
+    except Exception:
         return False
 
 def cargar_partida(ruta=None):
-
     if ruta is None:
         ruta = RUTA_PARTIDA
 
     try:
-        archivo = open(ruta, "r")
-        datos = json.load(archivo)
-        archivo.close()
-
-        datos = recuperar_datos(datos)
-
-        return datos
-
+        with open(ruta, "r", encoding="utf-8") as archivo:
+            datos = json.load(archivo)
+        return recuperar_datos(datos)
     except FileNotFoundError:
         print("No se encontró una partida guardada.")
         return None
-
     except json.JSONDecodeError:
         print("El archivo está dañado.")
         return None
 
 def guardar_puntaje(registro, ruta=None):
-
     if ruta is None:
         ruta = RUTA_PUNTAJES
 
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
     try:
         try:
-            archivo = open(ruta, "r")
-            puntajes = json.load(archivo)
-            archivo.close()
-
+            with open(ruta, "r", encoding="utf-8") as archivo:
+                puntajes = json.load(archivo)
         except FileNotFoundError:
             puntajes = []
 
         puntajes.append(registro)
 
-        archivo = open(ruta, "w")
-        json.dump(puntajes, archivo, indent=4)
-        archivo.close()
-
+        with open(ruta, "w", encoding="utf-8") as archivo:
+            json.dump(puntajes, archivo, indent=4)
         return True
-
-    except:
+    except Exception:
         return False
 
 def cargar_puntajes(ruta=None):
-
     if ruta is None:
         ruta = RUTA_PUNTAJES
 
     try:
-        archivo = open(ruta, "r")
-        puntajes = json.load(archivo)
-        archivo.close()
-
+        with open(ruta, "r", encoding="utf-8") as archivo:
+            puntajes = json.load(archivo)
         return puntajes
-
     except FileNotFoundError:
         print("No se encontraron puntajes.")
         return []
-
     except json.JSONDecodeError:
         print("El archivo de puntajes está dañado.")
         return []
