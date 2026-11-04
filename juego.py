@@ -4,18 +4,14 @@ Este módulo dibuja las pantallas con Pygame y llama a las funciones de
 estructuras.py y persistencia.py. No repite la lógica de esos módulos.
 """
 
-from datetime import date
+from datetime import datetime
+import os
 import sys
 
 import pygame
 
 import estructuras
-
-try:
-    import persistencia
-except ImportError:
-    # persistencia.py lo desarrolla Ana; mientras no exista, el juego avisa en pantalla.
-    persistencia = None
+import persistencia
 
 
 # Configuración de la ventana
@@ -296,6 +292,10 @@ class Juego:
         self.respondidas = 0
         self.intentos = 0
 
+        # Tabla de puntajes que se muestra al final.
+        self.puntajes = []
+        self.puntaje_guardado = False
+
         self.botones_menu = [
             Boton("iniciar", "Iniciar partida", pygame.Rect(370, 300, 260, 50)),
             Boton("cargar", "Cargar partida", pygame.Rect(370, 370, 260, 50)),
@@ -513,86 +513,102 @@ class Juego:
             "intentos": self.intentos,
         }
 
-    def guardar(self):
-        """Guarda la partida actual con persistencia.guardar_partida."""
-        if persistencia is None:
-            self.mensaje = "Error: persistencia.py todavía no está disponible."
-            return
+    def crear_carpeta_data(self):
+        """Crea la carpeta data/ si no existe, porque ahí escribe persistencia.py.
 
+        Retorna:
+            True si la carpeta existe o se pudo crear; False si hubo un error del sistema.
+        """
         try:
-            exito, mensaje = persistencia.guardar_partida(self.datos_partida())
-        except (OSError, TypeError, ValueError) as error:
-            self.mensaje = f"Error: no se pudo guardar la partida ({error})."
-            return
+            os.makedirs(persistencia.DATA_DIR, exist_ok=True)
+            return True
+        except OSError:
+            return False
+
+    def guardar(self):
+        """Guarda la partida actual con persistencia.guardar_partida, que devuelve True o False."""
+        exito = False
+        if self.crear_carpeta_data():
+            exito = persistencia.guardar_partida(self.datos_partida())
 
         if exito:
-            self.mensaje = mensaje
+            self.mensaje = "Partida guardada en data/partida.json."
         else:
-            self.mensaje = "Error: " + mensaje
+            self.mensaje = "Error: no se pudo guardar la partida."
 
     def cargar(self):
-        """Carga una partida con persistencia.cargar_partida y abre la sala donde iba."""
-        if persistencia is None:
-            self.mensaje = "Error: persistencia.py todavía no está disponible."
-            return
+        """Carga la partida con persistencia.cargar_partida y abre la sala donde iba el jugador.
 
-        try:
-            datos, mensaje = persistencia.cargar_partida()
-        except (OSError, ValueError) as error:
-            # Cubre FileNotFoundError y json.JSONDecodeError si el módulo los propaga.
-            self.mensaje = f"Error: no se pudo cargar la partida ({error})."
-            return
-
+        cargar_partida devuelve None si el archivo no existe o está dañado.
+        Si el archivo existe pero le faltan datos, se avisa y se sigue en el menú.
+        """
+        datos = persistencia.cargar_partida()
         if datos is None:
-            self.mensaje = "Error: " + mensaje
+            self.mensaje = "Error: no hay una partida guardada o el archivo está dañado."
             return
 
         try:
             datos_jugador = datos["jugador"]
-            self.jugador = Jugador(
+            jugador = Jugador(
                 datos_jugador["nombre"],
-                datos_jugador["vida"],
-                datos_jugador["puntaje"],
-                datos_jugador["nivel"],
-                datos_jugador["precision"],
-                datos_jugador["activo"],
+                int(datos_jugador["vida"]),
+                int(datos_jugador["puntaje"]),
+                int(datos_jugador["nivel"]),
+                float(datos_jugador["precision"]),
+                bool(datos_jugador["activo"]),
             )
-            self.inventario = estructuras.ordenar_fragmentos(list(datos["fragmentos"]))
-            self.pistas = {"a": list(datos["pistas"]["a"]), "b": list(datos["pistas"]["b"])}
-            self.aciertos = datos.get("aciertos", 0)
-            self.respondidas = datos.get("respondidas", 0)
-            self.intentos = datos.get("intentos", 0)
             sala = datos["sala_actual"]
+
+            # agregar_fragmento valida cada ficha y descarta códigos repetidos.
+            inventario = []
+            for fragmento in datos["fragmentos"]:
+                estructuras.agregar_fragmento(inventario, fragmento)
+
+            pistas = {"a": list(datos["pistas"]["a"]), "b": list(datos["pistas"]["b"])}
+            aciertos = int(datos["aciertos"])
+            respondidas = int(datos["respondidas"])
+            intentos = int(datos["intentos"])
         except (KeyError, TypeError, ValueError):
             self.mensaje = "Error: el archivo de la partida tiene datos incompletos."
             return
 
+        if not isinstance(jugador.nombre, str) or sala not in SALAS:
+            self.mensaje = "Error: el archivo de la partida tiene datos incompletos."
+            return
+
+        self.jugador = jugador
+        self.inventario = inventario
+        self.pistas = pistas
+        self.aciertos = aciertos
+        self.respondidas = respondidas
+        self.intentos = intentos
         self.abrir_sala(sala)
         self.mensaje = f"Partida de {self.jugador.nombre} cargada."
 
     def guardar_puntaje(self):
-        """Registra el resultado final con persistencia.guardar_puntaje."""
-        if persistencia is None:
-            self.mensaje = "Error: persistencia.py todavía no está disponible."
+        """Agrega el resultado final a la tabla con persistencia.guardar_puntaje."""
+        if self.puntaje_guardado:
+            self.mensaje = "Error: este puntaje ya se guardó."
             return
 
         registro = {
             "nombre": self.jugador.nombre,
             "puntaje": self.jugador.puntaje,
-            "fecha": date.today().isoformat(),
+            "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "fragmentos_validos": len(self.inventario),
             "intentos": self.intentos,
         }
-        try:
-            exito, mensaje = persistencia.guardar_puntaje(registro)
-        except (OSError, TypeError, ValueError) as error:
-            self.mensaje = f"Error: no se pudo guardar el puntaje ({error})."
-            return
+
+        exito = False
+        if self.crear_carpeta_data():
+            exito = persistencia.guardar_puntaje(registro)
 
         if exito:
-            self.mensaje = mensaje
+            self.puntaje_guardado = True
+            self.puntajes = persistencia.cargar_puntajes()
+            self.mensaje = "Puntaje guardado en data/puntajes.json."
         else:
-            self.mensaje = "Error: " + mensaje
+            self.mensaje = "Error: no se pudo guardar el puntaje."
 
     # ------------------------------------------------------------------
     # Pantalla final de la recolección
@@ -601,13 +617,28 @@ class Juego:
         """Prepara la pantalla final de la semana 2."""
         self.estado = "fin"
         self.mensaje = ""
+        self.puntaje_guardado = False
+        # La tabla se lee una sola vez aquí y no en cada dibujo, para no abrir el archivo 60 veces por segundo.
+        self.puntajes = persistencia.cargar_puntajes()
         self.botones = [
             Boton("guardar_puntaje", "Guardar puntaje", pygame.Rect(530, 595, 210, 42)),
             Boton("salir", "Salir", pygame.Rect(760, 595, 200, 42)),
         ]
 
+    def dibujar_puntajes(self, x, y, maximo=8):
+        """Muestra los mejores puntajes guardados, de mayor a menor."""
+        dibujar_texto(self.pantalla, self.fuentes["normal"], "Tabla de puntajes", (x, y), NARANJA)
+        if len(self.puntajes) == 0:
+            dibujar_texto(self.pantalla, self.fuentes["pequena"], "Todavía no hay puntajes guardados.", (x, y + 32), GRIS)
+            return
+
+        ordenados = sorted(self.puntajes, key=lambda registro: registro.get("puntaje", 0), reverse=True)
+        for indice, registro in enumerate(ordenados[:maximo]):
+            linea = f"{indice + 1}. {registro.get('nombre', '?')}  |  {registro.get('puntaje', 0)} pts  |  {registro.get('fecha', '')}"
+            dibujar_texto(self.pantalla, self.fuentes["pequena"], linea, (x, y + 32 + indice * 26))
+
     def dibujar_fin(self):
-        """Muestra el resumen de la partida."""
+        """Muestra el resumen de la partida y la tabla de puntajes."""
         self.dibujar_encabezado("Fin de la recolección", "La Sala Central se habilita en la semana 3.")
         if self.jugador.activo:
             dibujar_texto(self.pantalla, self.fuentes["titulo"], "¡Recolectaste los fragmentos!", (40, 110), VERDE)
@@ -617,6 +648,7 @@ class Juego:
         resumen = f"Puntaje: {self.jugador.puntaje}  |  Aciertos: {self.aciertos} de {self.respondidas}  |  Intentos fallidos: {self.intentos}"
         dibujar_texto(self.pantalla, self.fuentes["normal"], resumen, (40, 175))
         self.dibujar_inventario(40, 225, maximo=10)
+        self.dibujar_puntajes(560, 225)
         self.dibujar_mensaje((40, 560))
         self.dibujar_botones()
 
