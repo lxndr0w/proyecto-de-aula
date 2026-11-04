@@ -33,7 +33,13 @@ python main.py
    - **Sellos** (conjuntos): quitar códigos repetidos y ver unión, intersección y diferencia.
 4. Al terminar cada etapa hay una pregunta conceptual. Si se acierta, suma 10 puntos; si no,
    se pierde una vida y se puede seguir. Cada etapa superada entrega un fragmento.
-5. Al final se muestra el resumen y se puede guardar el puntaje.
+5. En cualquier sala el botón **Guardar** escribe la partida en `data/partida.json`.
+   **Cargar partida** en el menú la retoma en la sala donde iba.
+6. Al final se muestra el resumen, la tabla de puntajes y el botón **Guardar puntaje**,
+   que agrega el resultado a `data/puntajes.json`.
+
+Si no hay partida guardada, el archivo está dañado o le faltan datos, el juego lo avisa en
+pantalla y sigue en el menú.
 
 La Sala Central y el árbol binario de búsqueda se implementan en la semana 3.
 
@@ -54,11 +60,16 @@ La Sala Central y el árbol binario de búsqueda se implementan en la semana 3.
 
 | Función | Devuelve |
 | --- | --- |
-| `guardar_partida(datos_partida)` | `(exito: bool, mensaje: str)` |
-| `cargar_partida()` | `(datos: dict o None, mensaje: str)` |
-| `guardar_puntaje(registro)` | `(exito: bool, mensaje: str)` |
+| `guardar_partida(datos_partida)` | `True` si se escribió el archivo, `False` si no |
+| `cargar_partida()` | el diccionario de la partida, o `None` si el archivo no existe o está dañado |
+| `guardar_puntaje(registro)` | `True` si se agregó a la tabla, `False` si no |
+| `cargar_puntajes()` | la lista de registros de la tabla (vacía si no hay archivo) |
 
-`datos_partida` contiene `jugador`, `sala_actual`, `fragmentos`, `pistas`, `aciertos`,
+Las rutas salen de `persistencia.DATA_DIR`, `RUTA_PARTIDA` y `RUTA_PUNTAJES`. `juego.py`
+crea la carpeta `data/` antes de guardar si todavía no existe.
+
+`datos_partida` contiene `jugador` (nombre, vida, puntaje, nivel, precision, activo),
+`sala_actual`, `fragmentos` (lista de diccionarios), `pistas` (listas `a` y `b`), `aciertos`,
 `respondidas` e `intentos`. `registro` contiene `nombre`, `puntaje`, `fecha`,
 `fragmentos_validos` e `intentos`.
 
