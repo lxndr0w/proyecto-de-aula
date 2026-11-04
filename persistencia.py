@@ -60,6 +60,9 @@ def cargar_partida(ruta=None):
     except json.JSONDecodeError:
         print("El archivo está dañado.")
         return None
+    except (TypeError, ValueError):
+        print("El archivo está dañado.")
+        return None
 
 def guardar_puntaje(registro, ruta=None):
     if ruta is None:
