@@ -35,7 +35,7 @@ def guardar_partida(datos_partida, ruta=None):
     if ruta is None:
         ruta = RUTA_PARTIDA
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+Path(ruta).parent.mkdir(parents=True, exist_ok=True)
 
     datos = convertir_json(datos_partida)
 
@@ -68,7 +68,7 @@ def guardar_puntaje(registro, ruta=None):
     if ruta is None:
         ruta = RUTA_PUNTAJES
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+   Path(ruta).parent.mkdir(parents=True, exist_ok=True)
 
     try:
         try:
