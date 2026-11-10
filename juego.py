@@ -8,7 +8,7 @@ from datetime import datetime
 import os
 import sys
 
-import pygame
+import pygame  # pyright: ignore[reportMissingImports]
 
 import estructuras
 import persistencia
@@ -461,10 +461,15 @@ class Juego:
         self.botones.append(Boton("guardar", "Guardar", pygame.Rect(40, 595, 150, 42)))
 
     def avanzar_sala(self):
-        """Abre la sala que sigue a la última pregunta, o la pantalla final si ya no hay más."""
+        """Abre la sala siguiente. Después de Sellos abre la Sala Central.
+
+        Si el jugador se queda sin vidas antes de la última sala, pasa al resumen.
+        """
         indice = SALAS.index(self.sala_pregunta)
 
-        if not self.jugador.activo or indice == len(SALAS) - 1:
+        if indice == len(SALAS) - 1:
+            self.abrir_sala_central()
+        elif not self.jugador.activo:
             self.abrir_fin()
         else:
             self.abrir_sala(SALAS[indice + 1])
@@ -572,7 +577,7 @@ class Juego:
             self.mensaje = "Error: el archivo de la partida tiene datos incompletos."
             return
 
-        if not isinstance(jugador.nombre, str) or sala not in SALAS:
+        if not isinstance(jugador.nombre, str) or sala not in (*SALAS, "sala_central"):
             self.mensaje = "Error: el archivo de la partida tiene datos incompletos."
             return
 
@@ -582,7 +587,10 @@ class Juego:
         self.aciertos = aciertos
         self.respondidas = respondidas
         self.intentos = intentos
-        self.abrir_sala(sala)
+        if sala == "sala_central":
+            self.abrir_sala_central()
+        else:
+            self.abrir_sala(sala)
         self.mensaje = f"Partida de {self.jugador.nombre} cargada."
 
     def guardar_puntaje(self):
@@ -639,7 +647,7 @@ class Juego:
 
     def dibujar_fin(self):
         """Muestra el resumen de la partida y la tabla de puntajes."""
-        self.dibujar_encabezado("Fin de la recolección", "La Sala Central se habilita en la semana 3.")
+        self.dibujar_encabezado("Fin de la recolección", "Resumen de la partida y tabla de puntajes.")
         if self.jugador.activo:
             dibujar_texto(self.pantalla, self.fuentes["titulo"], "¡Recolectaste los fragmentos!", (40, 110), VERDE)
         else:
@@ -1040,6 +1048,49 @@ class Juego:
         self.mensaje = ""
 
     # ------------------------------------------------------------------
+    # Sala Central
+    # ------------------------------------------------------------------
+    def abrir_sala_central(self):
+        """Abre la Sala Central después de las cinco salas de recolección.
+
+        Parámetros:
+            Ninguno.
+        Retorna:
+            None.
+        """
+        self.estado = "sala_central"
+        self.mensaje = ""
+        self.campos = []
+        self.botones = [
+            Boton("terminar", "Ver puntajes", pygame.Rect(760, 595, 200, 42)),
+        ]
+
+    def dibujar_sala_central(self):
+        """Muestra la entrada a la reconstrucción del catálogo."""
+        self.dibujar_encabezado(
+            "Sala Central",
+            "Los fragmentos guardados se ordenan en un árbol binario de búsqueda.",
+        )
+        dibujar_texto(
+            self.pantalla,
+            self.fuentes["normal"],
+            "Desde aquí se reconstruye el catálogo y después se ve la tabla de puntajes.",
+            (40, 150),
+        )
+        self.dibujar_botones()
+
+    def accion_sala_central(self, accion):
+        """Pasa de la Sala Central a la tabla de puntajes.
+
+        Parámetros:
+            accion: nombre del botón presionado.
+        Retorna:
+            None.
+        """
+        if accion == "terminar":
+            self.abrir_fin()
+
+    # ------------------------------------------------------------------
     # Ciclo principal
     # ------------------------------------------------------------------
     def dibujar(self):
@@ -1062,6 +1113,8 @@ class Juego:
             self.dibujar_pregunta()
         elif self.estado == "respuesta":
             self.dibujar_respuesta()
+        elif self.estado == "sala_central":
+            self.dibujar_sala_central()
         elif self.estado == "fin":
             self.dibujar_fin()
 
@@ -1085,6 +1138,8 @@ class Juego:
                 self.responder(numero)
             elif self.estado == "respuesta":
                 self.avanzar_sala()
+            elif self.estado == "sala_central":
+                self.accion_sala_central(accion)
             elif self.estado == "fin":
                 self.accion_fin(accion)
         except (TypeError, ValueError) as error:
