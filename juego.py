@@ -1,7 +1,7 @@
 """Interfaz gráfica y navegación de El Archivo Perdido.
 
 Este módulo dibuja las pantallas con Pygame y llama a las funciones de
-estructuras.py y persistencia.py. No repite la lógica de esos módulos.
+estructuras.py, persistencia.py y arbol.py. No repite la lógica de esos módulos.
 """
 
 from datetime import datetime
@@ -10,6 +10,7 @@ import sys
 
 import pygame  # pyright: ignore[reportMissingImports]
 
+import arbol
 import estructuras
 import persistencia
 
@@ -24,6 +25,14 @@ SALAS = ["vestibulo", "estanterias", "mapas", "fichas", "sellos"]
 
 # Tamaño de la cuadrícula de la Sala de Mapas.
 TAMANO_MAPA = 6
+
+# Niveles que caben en un estante al ubicar el catálogo reconstruido.
+# El primer fragmento, ya ordenado por código, queda en la tupla (1, 1).
+# El sexto abre el estante 2. Es el mismo criterio que usa arbol.py.
+NIVELES_POR_ESTANTE = 5
+
+# Ubicaciones que se listan en pantalla antes de resumir el resto.
+MAX_UBICACIONES_VISIBLES = 8
 
 # Puntos que se suman por cada pregunta bien contestada.
 PUNTOS_POR_ACIERTO = 10
@@ -207,6 +216,156 @@ def crear_jugador(nombre, vida_texto, precision_texto):
     return jugador, ""
 
 
+def leer_fragmentos_guardados(ruta=None):
+    """Lee los fragmentos de la partida guardada en JSON.
+
+    Parámetros:
+        ruta: archivo de partida. Si no se indica, se usa data/partida.json.
+    Retorna:
+        Una tupla (fragmentos, mensaje). Si la lectura falla, fragmentos es None
+        y mensaje explica el problema. Una lista vacía sí es una lectura válida.
+    """
+    if ruta is None:
+        ruta = persistencia.RUTA_PARTIDA
+
+    if not os.path.isfile(ruta):
+        return None, "Error: no existe el archivo de la partida."
+
+    datos = persistencia.cargar_partida(ruta)
+    if not isinstance(datos, dict):
+        return None, "Error: el archivo de la partida tiene datos incorrectos."
+
+    fragmentos = datos.get("fragmentos")
+    if not isinstance(fragmentos, list):
+        return None, "Error: el archivo de la partida tiene datos incompletos."
+
+    return fragmentos, ""
+
+
+def reconstruir_fragmentos(fragmentos):
+    """Valida, depura e inserta los fragmentos en el árbol de búsqueda.
+
+    Parámetros:
+        fragmentos: lista de diccionarios leída desde la partida.
+    Retorna:
+        Un diccionario con pasos, mensaje, arbol, ubicaciones y ordenado.
+        arbol queda en None cuando no hay fragmentos utilizables.
+    """
+    if not isinstance(fragmentos, list):
+        return {
+            "pasos": ["2. Los datos guardados no son una lista de fragmentos."],
+            "mensaje": "Error: el archivo de la partida tiene datos incompletos.",
+            "arbol": None,
+            "ubicaciones": {},
+            "ordenado": False,
+        }
+
+    validos = []
+    incorrectos = 0
+    for fragmento in fragmentos:
+        if not isinstance(fragmento, dict):
+            incorrectos += 1
+            continue
+        try:
+            limpio = estructuras.crear_fragmento(
+                fragmento["codigo"],
+                fragmento["titulo"],
+                fragmento["sala"],
+                fragmento["valor"],
+            )
+        except (KeyError, TypeError, ValueError):
+            incorrectos += 1
+            continue
+        validos.append(limpio)
+
+    codigos = [fragmento["codigo"] for fragmento in validos]
+    try:
+        _, descartados = estructuras.eliminar_duplicados(codigos)
+    except (TypeError, ValueError):
+        return {
+            "pasos": ["2. No se pudieron depurar los códigos con un conjunto."],
+            "mensaje": "Error: los fragmentos guardados tienen datos incorrectos.",
+            "arbol": None,
+            "ubicaciones": {},
+            "ordenado": False,
+        }
+
+    unicos = []
+    vistos = set()
+    for fragmento in validos:
+        if fragmento["codigo"] in vistos:
+            continue
+        vistos.add(fragmento["codigo"])
+        unicos.append(fragmento)
+
+    if len(unicos) == 1:
+        quedan = "Queda 1 fragmento."
+    else:
+        quedan = f"Quedan {len(unicos)} fragmentos."
+    if descartados == 1:
+        repetidos = "1 código repetido"
+    else:
+        repetidos = f"{descartados} códigos repetidos"
+    pasos = [f"2. Depuración: un conjunto descartó {repetidos}. {quedan}"]
+    if incorrectos == 1:
+        pasos.append("   Se omitió 1 fragmento con datos incorrectos.")
+    elif incorrectos:
+        pasos.append(f"   Se omitieron {incorrectos} fragmentos con datos incorrectos.")
+
+    if len(unicos) == 0:
+        return {
+            "pasos": pasos,
+            "mensaje": "Error: no hay fragmentos válidos para reconstruir el catálogo.",
+            "arbol": None,
+            "ubicaciones": {},
+            "ordenado": False,
+        }
+
+    ordenados = estructuras.ordenar_fragmentos(unicos)
+    ubicaciones = {}
+    pasos.append(
+        "3. Ubicación: tupla (estante, nivel). Hay 5 niveles por estante y el orden es el del código."
+    )
+    for indice, fragmento in enumerate(ordenados):
+        estante = indice // NIVELES_POR_ESTANTE + 1
+        nivel = indice % NIVELES_POR_ESTANTE + 1
+        posicion = estructuras.crear_posicion(estante, nivel)
+        ubicaciones[fragmento["codigo"]] = posicion
+        if indice < MAX_UBICACIONES_VISIBLES:
+            estante, nivel = estructuras.desempaquetar_posicion(posicion)
+            titulo = fragmento["titulo"]
+            if len(titulo) > 32:
+                titulo = titulo[:31] + "..."
+            pasos.append(f"   {fragmento['codigo']} | {titulo} | (estante {estante}, nivel {nivel})")
+    ocultos = len(ordenados) - MAX_UBICACIONES_VISIBLES
+    if ocultos == 1:
+        pasos.append("   ... y 1 fragmento más.")
+    elif ocultos > 1:
+        pasos.append(f"   ... y {ocultos} fragmentos más.")
+
+    try:
+        catalogo = arbol.reconstruir_catalogo(unicos)["arbol"]
+    except (KeyError, TypeError, ValueError):
+        return {
+            "pasos": pasos + ["4. No se pudieron insertar los fragmentos en el árbol."],
+            "mensaje": "Error: no se pudo reconstruir el catálogo.",
+            "arbol": None,
+            "ubicaciones": ubicaciones,
+            "ordenado": False,
+        }
+
+    pasos.append(
+        f"4. Inserción: se insertaron {catalogo.tamano} fragmentos en el árbol, usando el código como clave."
+    )
+    return {
+        "pasos": pasos,
+        "mensaje": "Fragmentos insertados en el árbol de búsqueda.",
+        "arbol": catalogo,
+        "ubicaciones": ubicaciones,
+        "ordenado": False,
+    }
+
+
 def dibujar_texto(pantalla, fuente, texto, posicion, color=BLANCO):
     """Dibuja una línea de texto en la posición (x, y) indicada."""
     superficie = fuente.render(texto, True, color)
@@ -295,6 +454,11 @@ class Juego:
         # Tabla de puntajes que se muestra al final.
         self.puntajes = []
         self.puntaje_guardado = False
+
+        # Sala Central: árbol reconstruido, ubicaciones y pasos visibles.
+        self.arbol_catalogo = None
+        self.ubicaciones_catalogo = {}
+        self.pasos_sala = []
 
         self.botones_menu = [
             Boton("iniciar", "Iniciar partida", pygame.Rect(370, 300, 260, 50)),
@@ -588,10 +752,12 @@ class Juego:
         self.respondidas = respondidas
         self.intentos = intentos
         if sala == "sala_central":
-            self.abrir_sala_central()
+            self.abrir_sala_central(guardar_antes=False)
+            if not self.mensaje.startswith("Error"):
+                self.mensaje = f"Partida de {self.jugador.nombre} cargada."
         else:
             self.abrir_sala(sala)
-        self.mensaje = f"Partida de {self.jugador.nombre} cargada."
+            self.mensaje = f"Partida de {self.jugador.nombre} cargada."
 
     def guardar_puntaje(self):
         """Agrega el resultado final a la tabla con persistencia.guardar_puntaje."""
@@ -1050,44 +1216,94 @@ class Juego:
     # ------------------------------------------------------------------
     # Sala Central
     # ------------------------------------------------------------------
-    def abrir_sala_central(self):
-        """Abre la Sala Central después de las cinco salas de recolección.
+    def abrir_sala_central(self, guardar_antes=True):
+        """Abre la Sala Central y reconstruye el catálogo con la partida guardada.
 
         Parámetros:
-            Ninguno.
+            guardar_antes: True escribe el inventario actual en JSON antes de leerlo.
         Retorna:
             None.
         """
         self.estado = "sala_central"
         self.mensaje = ""
+        self.foco = 0
         self.campos = []
         self.botones = [
+            Boton("reconstruir", "Reconstruir", pygame.Rect(530, 595, 210, 42)),
             Boton("terminar", "Ver puntajes", pygame.Rect(760, 595, 200, 42)),
         ]
+        self.reconstruir_sala_central(guardar_antes)
+
+    def reconstruir_sala_central(self, guardar_antes=True):
+        """Carga el JSON, depura los fragmentos y los inserta en el árbol.
+
+        Parámetros:
+            guardar_antes: True actualiza data/partida.json con la partida en curso.
+        Retorna:
+            None.
+        """
+        self.arbol_catalogo = None
+        self.ubicaciones_catalogo = {}
+        self.pasos_sala = []
+
+        if guardar_antes and not persistencia.guardar_partida(self.datos_partida()):
+            self.pasos_sala.append(
+                "No se pudo escribir la partida actual. Se lee el archivo que ya estaba guardado."
+            )
+
+        fragmentos, error = leer_fragmentos_guardados()
+        if error:
+            detalle = error.removeprefix("Error: ")
+            self.pasos_sala.append(f"1. Carga: {detalle}")
+            self.mensaje = error
+            return
+
+        if len(fragmentos) == 0:
+            self.pasos_sala.append("1. Carga: el archivo se leyó, pero no hay fragmentos guardados.")
+            self.mensaje = "Error: no hay fragmentos guardados para reconstruir el catálogo."
+            return
+
+        resultado = reconstruir_fragmentos(fragmentos)
+        self.pasos_sala.append(
+            f"1. Carga: se leyeron {len(fragmentos)} fragmentos desde data/partida.json."
+        )
+        self.pasos_sala.extend(resultado["pasos"])
+        self.arbol_catalogo = resultado["arbol"]
+        self.ubicaciones_catalogo = resultado["ubicaciones"]
+        self.mensaje = resultado["mensaje"]
 
     def dibujar_sala_central(self):
-        """Muestra la entrada a la reconstrucción del catálogo."""
+        """Muestra los pasos de carga, depuración, ubicación e inserción."""
         self.dibujar_encabezado(
             "Sala Central",
             "Los fragmentos guardados se ordenan en un árbol binario de búsqueda.",
         )
-        dibujar_texto(
-            self.pantalla,
-            self.fuentes["normal"],
-            "Desde aquí se reconstruye el catálogo y después se ve la tabla de puntajes.",
-            (40, 150),
-        )
+        if len(self.pasos_sala) == 0:
+            dibujar_texto(
+                self.pantalla,
+                self.fuentes["pequena"],
+                "Todavía no hay una reconstrucción.",
+                (40, 105),
+                GRIS,
+            )
+        else:
+            for indice, linea in enumerate(self.pasos_sala[:14]):
+                dibujar_texto(self.pantalla, self.fuentes["pequena"], linea, (40, 105 + indice * 22))
+
+        self.dibujar_mensaje((40, 452))
         self.dibujar_botones()
 
     def accion_sala_central(self, accion):
-        """Pasa de la Sala Central a la tabla de puntajes.
+        """Reconstruye el catálogo o abre la tabla de puntajes.
 
         Parámetros:
             accion: nombre del botón presionado.
         Retorna:
             None.
         """
-        if accion == "terminar":
+        if accion == "reconstruir":
+            self.reconstruir_sala_central(guardar_antes=True)
+        elif accion == "terminar":
             self.abrir_fin()
 
     # ------------------------------------------------------------------
