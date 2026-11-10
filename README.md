@@ -35,7 +35,9 @@ python main.py
    se pierde una vida y se puede seguir. Cada etapa superada entrega un fragmento.
 5. En cualquier sala el botón **Guardar** escribe la partida en `data/partida.json`.
    **Cargar partida** en el menú la retoma en la sala donde iba.
-6. Al final se muestra el resumen, la tabla de puntajes y el botón **Guardar puntaje**,
+6. Al completar las cinco etapas de recolección se accede a la Sala Central (árbol binario
+   de búsqueda): se depuran fragmentos duplicados, se reconstruye el catálogo ordenado en          inorden y se buscan fragmentos por código comparando el número de comparaciones frente a la     búsqueda secuencial.
+7. Al final se muestra el resumen, la tabla de puntajes y el botón **Guardar puntaje**,
    que agrega el resultado a `data/puntajes.json`.
 
 Si no hay partida guardada, el archivo está dañado o le faltan datos, el juego lo avisa en
@@ -56,6 +58,11 @@ La Sala Central y el árbol binario de búsqueda se implementan en la semana 3.
 `ordenar_fragmentos`, `obtener_codigos_por_sala`, `crear_posicion`, `desempaquetar_posicion`,
 `consultar_ficha`, `eliminar_duplicados` y `operaciones_conjuntos`.
 
+### Clases y funciones de `arbol.py`
+`Nodo`, `ArbolBinarioBusqueda`,`insertar`, `buscar`, `inorden`, `verificar_orden`, `altura`,
+`busqueda_secuencial`, `reconstruir_catalogo`, `comparar_busquedas`, `experimento_comparaciones`.
+
+
 ### Funciones de `persistencia.py` que usa `juego.py`
 
 | Función | Devuelve |
@@ -75,6 +82,21 @@ crea la carpeta `data/` antes de guardar si todavía no existe.
 
 ## Pruebas
 
+La carpeta `test` contiene las pruebas unitarias del proyecto:
+
+- `test_estructuras.py`
+- `test_arbol.py`
+- `test_persistencia.py`
+
+Las pruebas verifican:
+
+- **Estructuras de datos:** operaciones de listas, tuplas, diccionarios y conjuntos.
+- **Árbol binario de búsqueda:** inserción, búsqueda, recorrido inorden, reconstrucción del catálogo y comparación de búsquedas.
+- **Persistencia:** guardado y recuperación de partidas y puntajes, manejo de archivos inexistentes o dañados y creación de rutas de almacenamiento.
+
+Para ejecutar todas las pruebas desde la raíz del proyecto:
+
 ```bash
 python -m unittest discover -s test -v
 ```
+
