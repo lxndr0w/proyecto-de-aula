@@ -35,8 +35,7 @@ def guardar_partida(datos_partida, ruta=None):
     if ruta is None:
         ruta = RUTA_PARTIDA
 
-Path(ruta).parent.mkdir(parents=True, exist_ok=True)
-
+    Path(ruta).parent.mkdir(parents=True, exist_ok=True)
     datos = convertir_json(datos_partida)
 
     try:
