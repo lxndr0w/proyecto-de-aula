@@ -1266,42 +1266,49 @@ class Juego:
         self.reconstruir_sala_central(guardar_antes)
 
     def reconstruir_sala_central(self, guardar_antes=True):
-        """Carga el JSON, depura los fragmentos y los inserta en el árbol.
+        """Carga el JSON, depura los fragmentos y muestra cada paso del árbol.
 
         Parámetros:
             guardar_antes: True actualiza data/partida.json con la partida en curso.
         Retorna:
-            None.
+            None. Un fallo de lectura o de datos deja el juego abierto y muestra el motivo.
         """
         self.arbol_catalogo = None
         self.ubicaciones_catalogo = {}
         self.pasos_sala = []
 
-        if guardar_antes and not persistencia.guardar_partida(self.datos_partida()):
+        try:
+            if guardar_antes and not persistencia.guardar_partida(self.datos_partida()):
+                self.pasos_sala.append(
+                    "No se pudo escribir la partida actual. Se lee el archivo que ya estaba guardado."
+                )
+
+            fragmentos, error = leer_fragmentos_guardados()
+            if error:
+                detalle = error.removeprefix("Error: ")
+                self.pasos_sala.append(f"1. Carga: {detalle}")
+                self.mensaje = error
+                return
+
+            if len(fragmentos) == 0:
+                self.pasos_sala.append("1. Carga: el archivo se leyó, pero no hay fragmentos guardados.")
+                self.mensaje = "Error: no hay fragmentos guardados para reconstruir el catálogo."
+                return
+
+            resultado = reconstruir_fragmentos(fragmentos)
             self.pasos_sala.append(
-                "No se pudo escribir la partida actual. Se lee el archivo que ya estaba guardado."
+                f"1. Carga: se leyeron {len(fragmentos)} fragmentos desde data/partida.json."
             )
-
-        fragmentos, error = leer_fragmentos_guardados()
-        if error:
-            detalle = error.removeprefix("Error: ")
-            self.pasos_sala.append(f"1. Carga: {detalle}")
-            self.mensaje = error
-            return
-
-        if len(fragmentos) == 0:
-            self.pasos_sala.append("1. Carga: el archivo se leyó, pero no hay fragmentos guardados.")
-            self.mensaje = "Error: no hay fragmentos guardados para reconstruir el catálogo."
-            return
-
-        resultado = reconstruir_fragmentos(fragmentos)
-        self.pasos_sala.append(
-            f"1. Carga: se leyeron {len(fragmentos)} fragmentos desde data/partida.json."
-        )
-        self.pasos_sala.extend(resultado["pasos"])
-        self.arbol_catalogo = resultado["arbol"]
-        self.ubicaciones_catalogo = resultado["ubicaciones"]
-        self.mensaje = resultado["mensaje"]
+            self.pasos_sala.extend(resultado["pasos"])
+            self.arbol_catalogo = resultado["arbol"]
+            self.ubicaciones_catalogo = resultado["ubicaciones"]
+            self.mensaje = resultado["mensaje"]
+        except Exception:
+            self.arbol_catalogo = None
+            self.ubicaciones_catalogo = {}
+            if len(self.pasos_sala) == 0:
+                self.pasos_sala.append("La reconstrucción se detuvo por un error y la partida sigue abierta.")
+            self.mensaje = "Error: no se pudo reconstruir el catálogo."
 
     def buscar_catalogo(self):
         """Busca un código en el árbol y muestra cuántas comparaciones hizo.
@@ -1319,28 +1326,31 @@ class Juego:
         if codigo is None:
             return
 
-        fragmento, comparaciones = self.arbol_catalogo.buscar(codigo)
-        if fragmento is None:
+        try:
+            fragmento, comparaciones = self.arbol_catalogo.buscar(codigo)
+            if fragmento is None:
+                self.mensaje = (
+                    f"Error: el código {codigo} no está en el catálogo. "
+                    f"El árbol hizo {comparaciones} comparaciones."
+                )
+                return
+
+            posicion = self.ubicaciones_catalogo.get(codigo)
+            if isinstance(posicion, tuple):
+                estante, nivel = estructuras.desempaquetar_posicion(posicion)
+                lugar = f" en el estante {estante}, nivel {nivel}"
+            else:
+                lugar = ""
+
+            titulo = fragmento["titulo"]
+            if len(titulo) > 32:
+                titulo = titulo[:31] + "..."
             self.mensaje = (
-                f"Error: el código {codigo} no está en el catálogo. "
-                f"El árbol hizo {comparaciones} comparaciones."
+                f"Código {codigo} encontrado{lugar}: {titulo}. "
+                f"Comparaciones del árbol: {comparaciones}."
             )
-            return
-
-        posicion = self.ubicaciones_catalogo.get(codigo)
-        if isinstance(posicion, tuple):
-            estante, nivel = estructuras.desempaquetar_posicion(posicion)
-            lugar = f" en el estante {estante}, nivel {nivel}"
-        else:
-            lugar = ""
-
-        titulo = fragmento["titulo"]
-        if len(titulo) > 32:
-            titulo = titulo[:31] + "..."
-        self.mensaje = (
-            f"Código {codigo} encontrado{lugar}: {titulo}. "
-            f"Comparaciones del árbol: {comparaciones}."
-        )
+        except (TypeError, ValueError, KeyError):
+            self.mensaje = "Error: no se pudo buscar ese código en el catálogo."
 
     def dibujar_sala_central(self):
         """Muestra los pasos de reconstrucción y la búsqueda por código."""
