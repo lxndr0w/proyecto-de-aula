@@ -216,6 +216,23 @@ def crear_jugador(nombre, vida_texto, precision_texto):
     return jugador, ""
 
 
+def _texto_codigos(codigos, limite=12):
+    """Resume una lista de códigos para mostrarla en una sola línea.
+
+    Parámetros:
+        codigos: códigos que se quieren mostrar.
+        limite: cantidad máxima de códigos visibles.
+    Retorna:
+        Un texto con los códigos separados por comas.
+    """
+    if len(codigos) == 0:
+        return "(ninguno)"
+    if len(codigos) <= limite:
+        return ", ".join(str(codigo) for codigo in codigos)
+    visibles = ", ".join(str(codigo) for codigo in codigos[:limite])
+    return f"{visibles}... ({len(codigos)} en total)"
+
+
 def leer_fragmentos_guardados(ruta=None):
     """Lee los fragmentos de la partida guardada en JSON.
 
@@ -357,12 +374,25 @@ def reconstruir_fragmentos(fragmentos):
     pasos.append(
         f"4. Inserción: se insertaron {catalogo.tamano} fragmentos en el árbol, usando el código como clave."
     )
+    codigos_ordenados = [fragmento["codigo"] for fragmento in catalogo.inorden()]
+    ordenado = catalogo.verificar_orden()
+    if ordenado:
+        pasos.append(
+            f"5. Inorden: {_texto_codigos(codigos_ordenados)}. Los códigos quedaron en orden ascendente."
+        )
+        mensaje = "Catálogo reconstruido. El recorrido inorden está ordenado."
+    else:
+        pasos.append(
+            f"5. Inorden: {_texto_codigos(codigos_ordenados)}. Los códigos no quedaron ordenados."
+        )
+        mensaje = "Error: el recorrido inorden no quedó ordenado."
+
     return {
         "pasos": pasos,
-        "mensaje": "Fragmentos insertados en el árbol de búsqueda.",
+        "mensaje": mensaje,
         "arbol": catalogo,
         "ubicaciones": ubicaciones,
-        "ordenado": False,
+        "ordenado": ordenado,
     }
 
 
@@ -1214,7 +1244,7 @@ class Juego:
         self.mensaje = ""
 
     # ------------------------------------------------------------------
-    # Sala Central
+    # Sala Central: reconstrucción del catálogo
     # ------------------------------------------------------------------
     def abrir_sala_central(self, guardar_antes=True):
         """Abre la Sala Central y reconstruye el catálogo con la partida guardada.
@@ -1227,8 +1257,9 @@ class Juego:
         self.estado = "sala_central"
         self.mensaje = ""
         self.foco = 0
-        self.campos = []
+        self.campos = [CampoTexto("Código a buscar", pygame.Rect(40, 508, 240, 42))]
         self.botones = [
+            Boton("buscar", "Buscar", pygame.Rect(300, 508, 150, 42)),
             Boton("reconstruir", "Reconstruir", pygame.Rect(530, 595, 210, 42)),
             Boton("terminar", "Ver puntajes", pygame.Rect(760, 595, 200, 42)),
         ]
@@ -1272,8 +1303,47 @@ class Juego:
         self.ubicaciones_catalogo = resultado["ubicaciones"]
         self.mensaje = resultado["mensaje"]
 
+    def buscar_catalogo(self):
+        """Busca un código en el árbol y muestra cuántas comparaciones hizo.
+
+        Parámetros:
+            Ninguno. El código sale del campo de texto de la Sala Central.
+        Retorna:
+            None. El resultado queda en el mensaje de la pantalla.
+        """
+        if self.arbol_catalogo is None:
+            self.mensaje = "Error: no hay un catálogo reconstruido para buscar."
+            return
+
+        codigo = self.leer_entero(0, "Código", minimo=1)
+        if codigo is None:
+            return
+
+        fragmento, comparaciones = self.arbol_catalogo.buscar(codigo)
+        if fragmento is None:
+            self.mensaje = (
+                f"Error: el código {codigo} no está en el catálogo. "
+                f"El árbol hizo {comparaciones} comparaciones."
+            )
+            return
+
+        posicion = self.ubicaciones_catalogo.get(codigo)
+        if isinstance(posicion, tuple):
+            estante, nivel = estructuras.desempaquetar_posicion(posicion)
+            lugar = f" en el estante {estante}, nivel {nivel}"
+        else:
+            lugar = ""
+
+        titulo = fragmento["titulo"]
+        if len(titulo) > 32:
+            titulo = titulo[:31] + "..."
+        self.mensaje = (
+            f"Código {codigo} encontrado{lugar}: {titulo}. "
+            f"Comparaciones del árbol: {comparaciones}."
+        )
+
     def dibujar_sala_central(self):
-        """Muestra los pasos de carga, depuración, ubicación e inserción."""
+        """Muestra los pasos de reconstrucción y la búsqueda por código."""
         self.dibujar_encabezado(
             "Sala Central",
             "Los fragmentos guardados se ordenan en un árbol binario de búsqueda.",
@@ -1289,12 +1359,15 @@ class Juego:
         else:
             for indice, linea in enumerate(self.pasos_sala[:14]):
                 dibujar_texto(self.pantalla, self.fuentes["pequena"], linea, (40, 105 + indice * 22))
+            if len(self.pasos_sala) > 14:
+                dibujar_texto(self.pantalla, self.fuentes["pequena"], "...", (40, 105 + 14 * 22), GRIS)
 
         self.dibujar_mensaje((40, 452))
+        self.dibujar_campos()
         self.dibujar_botones()
 
     def accion_sala_central(self, accion):
-        """Reconstruye el catálogo o abre la tabla de puntajes.
+        """Reconstruye el catálogo, busca un código o abre la tabla de puntajes.
 
         Parámetros:
             accion: nombre del botón presionado.
@@ -1303,6 +1376,8 @@ class Juego:
         """
         if accion == "reconstruir":
             self.reconstruir_sala_central(guardar_antes=True)
+        elif accion == "buscar":
+            self.buscar_catalogo()
         elif accion == "terminar":
             self.abrir_fin()
 
@@ -1400,6 +1475,8 @@ class Juego:
                 self.ejecutar_accion("mover")
             elif self.estado == "fichas":
                 self.ejecutar_accion("consultar")
+            elif self.estado == "sala_central":
+                self.ejecutar_accion("buscar")
         elif evento.unicode != "" and evento.unicode.isprintable() and len(campo.texto) < 30:
             campo.texto += evento.unicode
 
