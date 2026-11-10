@@ -67,7 +67,7 @@ def guardar_puntaje(registro, ruta=None):
     if ruta is None:
         ruta = RUTA_PUNTAJES
 
-   Path(ruta).parent.mkdir(parents=True, exist_ok=True)
+    Path(ruta).parent.mkdir(parents=True, exist_ok=True)
 
     try:
         try:
